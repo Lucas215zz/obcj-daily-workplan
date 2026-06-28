@@ -105,15 +105,89 @@
   gap: 8px;
 }
 
+.dwp-project-list {
+  gap: 12px;
+}
+
+.dwp-project {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.dwp-project-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  background: var(--background-secondary);
+}
+
+.dwp-project-main {
+  min-width: 0;
+}
+
+.dwp-project-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dwp-project-title-row h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.dwp-project-count {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.dwp-project-count.is-complete {
+  color: var(--text-success);
+}
+
+.dwp-project-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dwp-progress {
+  height: 5px;
+  background: var(--background-modifier-border);
+}
+
+.dwp-progress-bar {
+  height: 100%;
+  background: var(--interactive-accent);
+}
+
+.dwp-project-tasks {
+  display: grid;
+  gap: 0;
+  padding: 4px 8px 8px;
+}
+
 .dwp-row {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 32px;
   align-items: start;
   gap: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
   background: var(--background-primary);
-  padding: 9px;
+  padding: 10px 2px;
+}
+
+.dwp-project-tasks .dwp-row:last-child {
+  border-bottom: 0;
 }
 
 .dwp-row.is-done {
@@ -177,6 +251,11 @@
 .dwp-chip.warning {
   background: rgba(230, 126, 34, 0.15);
   color: #b86612;
+}
+
+.dwp-chip.accent {
+  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  color: var(--interactive-accent);
 }
 
 .dwp-chip.danger {

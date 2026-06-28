@@ -14,9 +14,12 @@ const VIEW_TYPE = "daily-work-plan-view";
 const DEFAULT_SETTINGS = {
   sourceFolder: "所有笔记/待办事项/每日事项",
   defaultPriority: "中",
+  defaultProject: "",
   defaultStartTime: "09:00",
   defaultEndTime: "18:00",
 };
+
+const PROJECT_FIELDS = ["项目", "project", "所属项目", "项目名称", "父项目"];
 
 const DATE_FORMATS = [
   "YYYY-MM-DD",
@@ -100,6 +103,21 @@ function priorityRank(value) {
   if (/中|medium|normal/i.test(priority)) return 1;
   if (/低|low/i.test(priority)) return 2;
   return 3;
+}
+
+function projectText(frontmatter, fallback) {
+  for (const field of PROJECT_FIELDS) {
+    const project = firstTextValue(frontmatter?.[field]);
+    if (project) return project;
+  }
+  return fallback || "未归属项目";
+}
+
+function slugText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w\u4e00-\u9fa5-]/g, "");
 }
 
 function normalizeFolder(folder) {
@@ -195,8 +213,8 @@ class DailyWorkPlanPlugin extends Plugin {
     }
   }
 
-  openNewTaskModal() {
-    new NewDailyTaskModal(this.app, this, async file => {
+  openNewTaskModal(defaults = {}) {
+    new NewDailyTaskModal(this.app, this, defaults, async file => {
       await this.refreshViews();
       if (file) await this.openFile(file, 0);
     }).open();
@@ -216,6 +234,8 @@ class DailyWorkPlanPlugin extends Plugin {
       const status = textValue(frontmatter["待办状态"]);
       const priority = priorityText(frontmatter["优先级"]);
       const rank = priorityRank(frontmatter["优先级"]);
+      const project = projectText(frontmatter, file.basename);
+      const projectKey = slugText(project) || file.path;
 
       if (taskMatches.length) {
         for (const task of taskMatches) {
@@ -231,6 +251,8 @@ class DailyWorkPlanPlugin extends Plugin {
             priority,
             priorityRank: rank,
             status,
+            project,
+            projectKey,
             mtime: file.stat.mtime,
           });
         }
@@ -253,6 +275,8 @@ class DailyWorkPlanPlugin extends Plugin {
         priority,
         priorityRank: rank,
         status,
+        project,
+        projectKey,
         mtime: file.stat.mtime,
       });
     }
@@ -360,9 +384,10 @@ class DailyWorkPlanPlugin extends Plugin {
     const folder = await this.ensureSourceFolder();
     const date = input.date || m()().format("YYYY-MM-DD");
     const title = cleanTaskText(input.title);
+    const project = cleanTaskText(input.project || this.settings.defaultProject);
     if (!title) throw new Error("请填写任务内容");
 
-    const baseName = `${date} ${safeFileName(title)}`;
+    const baseName = `${date} ${project ? safeFileName(project) + " " : ""}${safeFileName(title)}`;
     let path = `${folder}/${baseName}.md`;
     let index = 2;
     while (await this.app.vault.adapter.exists(path)) {
@@ -382,6 +407,7 @@ class DailyWorkPlanPlugin extends Plugin {
       `开始时间: ${start}`,
       `结束时间: ${end}`,
       `优先级: ${input.priority || this.settings.defaultPriority}`,
+      `项目: ${project}`,
       "备注:",
       "---",
       `- [ ] ${title}`,
@@ -515,7 +541,7 @@ class DailyWorkPlanView extends ItemView {
   renderTaskList() {
     this.contentEl.querySelector(".dwp-list")?.remove();
 
-    const list = this.contentEl.createDiv({ cls: "dwp-list" });
+    const list = this.contentEl.createDiv({ cls: "dwp-list dwp-project-list" });
     const items = this.getVisibleItems();
 
     if (!items.length) {
@@ -524,8 +550,84 @@ class DailyWorkPlanView extends ItemView {
       return;
     }
 
+    for (const project of this.getVisibleProjects(items)) {
+      this.renderProject(list, project);
+    }
+  }
+
+  getVisibleProjects(items) {
+    const groups = new Map();
+
     for (const item of items) {
-      this.renderItem(list, item);
+      const key = item.projectKey || item.file.path;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          name: item.project || item.file.basename,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(item);
+    }
+
+    return Array.from(groups.values())
+      .map(project => {
+        project.items.sort((a, b) => this.sortItems(a, b));
+        project.total = project.items.length;
+        project.done = project.items.filter(item => item.completed).length;
+        project.open = project.total - project.done;
+        project.today = project.items.filter(item => !item.completed && this.isToday(item)).length;
+        project.overdue = project.items.filter(item => !item.completed && this.isOverdue(item)).length;
+        project.week = project.items.filter(item => !item.completed && this.isWeek(item)).length;
+        project.priorityRank = Math.min(...project.items.map(item => item.priorityRank));
+        project.progress = project.total ? Math.round((project.done / project.total) * 100) : 0;
+        project.nextDate = project.items
+          .map(item => item.due || item.date)
+          .filter(Boolean)
+          .sort((a, b) => a.valueOf() - b.valueOf())[0] || null;
+        return project;
+      })
+      .sort((a, b) => this.sortProjects(a, b));
+  }
+
+  sortProjects(a, b) {
+    if (a.overdue !== b.overdue) return b.overdue - a.overdue;
+    if (a.today !== b.today) return b.today - a.today;
+    if (a.priorityRank !== b.priorityRank) return a.priorityRank - b.priorityRank;
+    if (a.nextDate && b.nextDate && !a.nextDate.isSame(b.nextDate, "day")) return a.nextDate.valueOf() - b.nextDate.valueOf();
+    if (a.nextDate && !b.nextDate) return -1;
+    if (!a.nextDate && b.nextDate) return 1;
+    return a.name.localeCompare(b.name, "zh-CN");
+  }
+
+  renderProject(parent, project) {
+    const card = parent.createDiv({ cls: "dwp-project" });
+    const header = card.createDiv({ cls: "dwp-project-header" });
+    const main = header.createDiv({ cls: "dwp-project-main" });
+    const titleRow = main.createDiv({ cls: "dwp-project-title-row" });
+    titleRow.createEl("h3", { text: project.name });
+    const count = titleRow.createSpan({
+      cls: "dwp-project-count",
+      text: `${project.open} 未完成 / ${project.total} 支线`,
+    });
+    count.toggleClass("is-complete", project.open === 0);
+
+    const meta = main.createDiv({ cls: "dwp-meta" });
+    this.chip(meta, `${project.progress}% 完成`, project.progress === 100 ? "" : "accent");
+    if (project.today) this.chip(meta, `今日 ${project.today}`, "accent");
+    if (project.overdue) this.chip(meta, `逾期 ${project.overdue}`, "danger");
+    if (project.week) this.chip(meta, `未来7天 ${project.week}`, "warning");
+    if (project.nextDate) this.chip(meta, "下个截止 " + dateLabel(project.nextDate));
+
+    const actions = header.createDiv({ cls: "dwp-project-actions" });
+    this.iconButton(actions, "plus", "新增支线任务", () => this.plugin.openNewTaskModal({ project: project.name }));
+
+    const progress = card.createDiv({ cls: "dwp-progress", attr: { "aria-label": `项目完成度 ${project.progress}%` } });
+    progress.createDiv({ cls: "dwp-progress-bar", attr: { style: `width: ${project.progress}%` } });
+
+    const tasks = card.createDiv({ cls: "dwp-project-tasks" });
+    for (const item of project.items) {
+      this.renderItem(tasks, item);
     }
   }
 
@@ -551,6 +653,7 @@ class DailyWorkPlanView extends ItemView {
     this.chip(meta, "计划 " + dateLabel(item.date));
     this.chip(meta, "截止 " + dateLabel(item.due), item.due && this.isOverdue(item) ? "danger" : "");
     this.chip(meta, "优先级 " + item.priority, item.priorityRank === 0 ? "danger" : item.priorityRank === 1 ? "warning" : "");
+    this.chip(meta, "项目 " + item.project);
     if (item.status) this.chip(meta, "状态 " + item.status);
     this.chip(meta, item.file.basename);
 
@@ -576,7 +679,7 @@ class DailyWorkPlanView extends ItemView {
       .filter(item => this.matchesFilter(item))
       .filter(item => {
         if (!query) return true;
-        return `${item.text} ${item.file.basename} ${item.priority} ${item.status}`.toLowerCase().includes(query);
+        return `${item.text} ${item.project} ${item.file.basename} ${item.priority} ${item.status}`.toLowerCase().includes(query);
       })
       .sort((a, b) => this.sortItems(a, b));
   }
@@ -622,9 +725,10 @@ class DailyWorkPlanView extends ItemView {
 }
 
 class NewDailyTaskModal extends Modal {
-  constructor(app, plugin, onCreate) {
+  constructor(app, plugin, defaults, onCreate) {
     super(app);
     this.plugin = plugin;
+    this.defaults = defaults || {};
     this.onCreate = onCreate;
   }
 
@@ -634,11 +738,13 @@ class NewDailyTaskModal extends Modal {
     this.contentEl.createEl("h2", { text: "新增每日事项" });
 
     const form = this.contentEl.createEl("form", { cls: "dwp-form" });
+    const project = this.field(form, "所属项目", "text", "例如：视频号运营");
     const title = this.field(form, "任务内容", "text", "例如：整理今日工作计划");
     const date = this.field(form, "计划日期", "date");
     const startTime = this.field(form, "开始时间", "time");
     const endTime = this.field(form, "结束时间", "time");
 
+    project.value = this.defaults.project || this.plugin.settings.defaultProject || "";
     date.value = m()().format("YYYY-MM-DD");
     startTime.value = this.plugin.settings.defaultStartTime;
     endTime.value = this.plugin.settings.defaultEndTime;
@@ -661,6 +767,7 @@ class NewDailyTaskModal extends Modal {
       submit.disabled = true;
       try {
         const file = await this.plugin.createTask({
+          project: project.value,
           title: title.value,
           date: date.value,
           startTime: startTime.value,
@@ -717,6 +824,17 @@ class DailyWorkPlanSettingTab extends PluginSettingTab {
         dropdown.setValue(this.plugin.settings.defaultPriority);
         dropdown.onChange(async value => {
           this.plugin.settings.defaultPriority = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("默认项目")
+      .setDesc("新增事项时默认填入的项目名，可以留空。")
+      .addText(text => {
+        text.setPlaceholder("例如：日常工作").setValue(this.plugin.settings.defaultProject);
+        text.onChange(async value => {
+          this.plugin.settings.defaultProject = cleanTaskText(value);
           await this.plugin.saveSettings();
         });
       });

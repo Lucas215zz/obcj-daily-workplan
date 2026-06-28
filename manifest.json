@@ -1,7 +1,7 @@
 {
   "id": "daily-work-plan",
   "name": "每日工作计划",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.4.0",
   "description": "从指定 Obsidian 目录汇总每日工作计划和待办事项。",
   "author": "Lucas215zz",
