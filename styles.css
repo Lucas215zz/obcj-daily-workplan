@@ -285,7 +285,8 @@
   gap: 5px;
 }
 
-.dwp-field label {
+.dwp-field label,
+.dwp-task-group > label {
   color: var(--text-muted);
   font-size: 0.84rem;
 }
@@ -293,6 +294,24 @@
 .dwp-field input,
 .dwp-field select {
   width: 100%;
+}
+
+.dwp-task-group {
+  display: grid;
+  gap: 6px;
+}
+
+.dwp-task-inputs {
+  display: grid;
+  gap: 8px;
+}
+
+.dwp-task-inputs input {
+  width: 100%;
+}
+
+.dwp-add-task {
+  justify-self: start;
 }
 
 .dwp-form-footer {

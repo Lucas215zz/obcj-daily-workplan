@@ -383,11 +383,13 @@ class DailyWorkPlanPlugin extends Plugin {
   async createTask(input) {
     const folder = await this.ensureSourceFolder();
     const date = input.date || m()().format("YYYY-MM-DD");
-    const title = cleanTaskText(input.title);
+    const tasks = (Array.isArray(input.tasks) ? input.tasks : [input.title])
+      .map(cleanTaskText)
+      .filter(Boolean);
     const project = cleanTaskText(input.project || this.settings.defaultProject);
-    if (!title) throw new Error("请填写任务内容");
+    if (!tasks.length) throw new Error("请至少填写一个待办事项");
 
-    const baseName = `${date} ${project ? safeFileName(project) + " " : ""}${safeFileName(title)}`;
+    const baseName = `${date} ${project ? safeFileName(project) : "每日事项"}`;
     let path = `${folder}/${baseName}.md`;
     let index = 2;
     while (await this.app.vault.adapter.exists(path)) {
@@ -410,7 +412,7 @@ class DailyWorkPlanPlugin extends Plugin {
       `项目: ${project}`,
       "备注:",
       "---",
-      `- [ ] ${title}`,
+      ...tasks.map(task => `- [ ] ${task}`),
       "",
     ].join("\n");
 
@@ -739,7 +741,29 @@ class NewDailyTaskModal extends Modal {
 
     const form = this.contentEl.createEl("form", { cls: "dwp-form" });
     const project = this.field(form, "所属项目", "text", "例如：视频号运营");
-    const title = this.field(form, "任务内容", "text", "例如：整理今日工作计划");
+    const taskInputs = [];
+    const taskGroup = form.createDiv({ cls: "dwp-task-group" });
+    taskGroup.createEl("label", { text: "任务内容" });
+    const taskList = taskGroup.createDiv({ cls: "dwp-task-inputs" });
+    const addTaskInput = (placeholder = "") => {
+      const input = taskList.createEl("input", {
+        type: "text",
+        placeholder: placeholder || `待办事项 ${taskInputs.length + 1}`,
+      });
+      taskInputs.push(input);
+      return input;
+    };
+    addTaskInput("待办事项 1");
+    addTaskInput("待办事项 2");
+    addTaskInput("待办事项 3");
+
+    const addTask = form.createEl("button", {
+      text: "再加一项",
+      type: "button",
+      cls: "dwp-add-task",
+    });
+    addTask.addEventListener("click", () => addTaskInput().focus());
+
     const date = this.field(form, "计划日期", "date");
     const startTime = this.field(form, "开始时间", "time");
     const endTime = this.field(form, "结束时间", "time");
@@ -768,7 +792,7 @@ class NewDailyTaskModal extends Modal {
       try {
         const file = await this.plugin.createTask({
           project: project.value,
-          title: title.value,
+          tasks: taskInputs.map(input => input.value),
           date: date.value,
           startTime: startTime.value,
           endTime: endTime.value,
@@ -783,7 +807,7 @@ class NewDailyTaskModal extends Modal {
       }
     });
 
-    title.focus();
+    taskInputs[0].focus();
   }
 
   field(parent, label, type, placeholder = "") {
