@@ -424,6 +424,8 @@ class DailyWorkPlanView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    this.expandedProjects = new Set();
+    this.previewTaskLimit = 5;
     this.activeFilter = "today";
     this.searchText = "";
     this.items = [];
@@ -486,6 +488,7 @@ class DailyWorkPlanView extends ItemView {
       open: open.length,
       done: this.items.length - open.length,
       inbox: open.filter(item => !item.date && !item.due).length,
+      projects: new Set(open.map(item => item.projectKey || item.file.path)).size,
     };
   }
 
@@ -498,6 +501,7 @@ class DailyWorkPlanView extends ItemView {
       ["未完成", stats.open],
       ["已完成", stats.done],
       ["无日期", stats.inbox],
+      ["项目", stats.projects],
     ];
 
     const grid = this.contentEl.createDiv({ cls: "dwp-stats" });
@@ -531,7 +535,7 @@ class DailyWorkPlanView extends ItemView {
     const search = controls.createEl("input", {
       type: "search",
       cls: "dwp-search",
-      placeholder: "搜索任务或来源",
+      placeholder: "搜索项目、任务或来源",
       value: this.searchText,
     });
     search.addEventListener("input", event => {
@@ -582,6 +586,9 @@ class DailyWorkPlanView extends ItemView {
         project.overdue = project.items.filter(item => !item.completed && this.isOverdue(item)).length;
         project.week = project.items.filter(item => !item.completed && this.isWeek(item)).length;
         project.priorityRank = Math.min(...project.items.map(item => item.priorityRank));
+        project.priority = project.items
+          .slice()
+          .sort((a, b) => a.priorityRank - b.priorityRank)[0]?.priority || "未设";
         project.progress = project.total ? Math.round((project.done / project.total) * 100) : 0;
         project.nextDate = project.items
           .map(item => item.due || item.date)
@@ -604,22 +611,29 @@ class DailyWorkPlanView extends ItemView {
 
   renderProject(parent, project) {
     const card = parent.createDiv({ cls: "dwp-project" });
+    card.toggleClass("is-overdue", project.overdue > 0);
+    card.toggleClass("is-today", project.today > 0 && project.overdue === 0);
+    card.toggleClass("is-complete", project.open === 0);
+
     const header = card.createDiv({ cls: "dwp-project-header" });
     const main = header.createDiv({ cls: "dwp-project-main" });
     const titleRow = main.createDiv({ cls: "dwp-project-title-row" });
     titleRow.createEl("h3", { text: project.name });
-    const count = titleRow.createSpan({
-      cls: "dwp-project-count",
-      text: `${project.open} 未完成 / ${project.total} 支线`,
-    });
-    count.toggleClass("is-complete", project.open === 0);
 
-    const meta = main.createDiv({ cls: "dwp-meta" });
-    this.chip(meta, `${project.progress}% 完成`, project.progress === 100 ? "" : "accent");
-    if (project.today) this.chip(meta, `今日 ${project.today}`, "accent");
-    if (project.overdue) this.chip(meta, `逾期 ${project.overdue}`, "danger");
+    const badges = titleRow.createDiv({ cls: "dwp-project-badges" });
+    this.priorityChip(badges, project.priority, project.priorityRank);
+    if (project.overdue) this.chip(badges, `逾期 ${project.overdue}`, "danger");
+    else if (project.today) this.chip(badges, `今日 ${project.today}`, "accent");
+
+    const summary = main.createDiv({ cls: "dwp-project-summary" });
+    const doneText = `${project.done}/${project.total} 完成`;
+    const dueText = project.nextDate ? `下个截止 ${dateLabel(project.nextDate)}` : "未设置截止";
+    summary.setText(`${doneText} · ${dueText}`);
+
+    const meta = main.createDiv({ cls: "dwp-project-metrics" });
+    this.chip(meta, `${project.progress}%`, project.progress === 100 ? "success" : "accent");
+    this.chip(meta, `${project.open} 未完成`, project.open === 0 ? "success" : "");
     if (project.week) this.chip(meta, `未来7天 ${project.week}`, "warning");
-    if (project.nextDate) this.chip(meta, "下个截止 " + dateLabel(project.nextDate));
 
     const actions = header.createDiv({ cls: "dwp-project-actions" });
     this.iconButton(actions, "plus", "新增支线任务", () => this.plugin.openNewTaskModal({ project: project.name }));
@@ -628,8 +642,22 @@ class DailyWorkPlanView extends ItemView {
     progress.createDiv({ cls: "dwp-progress-bar", attr: { style: `width: ${project.progress}%` } });
 
     const tasks = card.createDiv({ cls: "dwp-project-tasks" });
-    for (const item of project.items) {
+    const isExpanded = this.expandedProjects.has(project.key);
+    const visibleItems = isExpanded ? project.items : project.items.slice(0, this.previewTaskLimit);
+    for (const item of visibleItems) {
       this.renderItem(tasks, item);
+    }
+
+    if (project.items.length > this.previewTaskLimit) {
+      const expand = card.createEl("button", {
+        cls: "dwp-project-expand",
+        text: isExpanded ? "收起任务" : `展开全部 ${project.items.length} 个任务`,
+      });
+      expand.addEventListener("click", () => {
+        if (isExpanded) this.expandedProjects.delete(project.key);
+        else this.expandedProjects.add(project.key);
+        this.renderTaskList();
+      });
     }
   }
 
@@ -651,12 +679,12 @@ class DailyWorkPlanView extends ItemView {
     const title = body.createEl("button", { cls: "dwp-title", text: item.text });
     title.addEventListener("click", () => this.plugin.openFile(item.file, Math.max(item.line - 1, 0)));
 
-    const meta = body.createDiv({ cls: "dwp-meta" });
-    this.chip(meta, "计划 " + dateLabel(item.date));
-    this.chip(meta, "截止 " + dateLabel(item.due), item.due && this.isOverdue(item) ? "danger" : "");
-    this.chip(meta, "优先级 " + item.priority, item.priorityRank === 0 ? "danger" : item.priorityRank === 1 ? "warning" : "");
-    this.chip(meta, "项目 " + item.project);
-    if (item.status) this.chip(meta, "状态 " + item.status);
+    const meta = body.createDiv({ cls: "dwp-meta dwp-task-meta" });
+    if (item.due) this.chip(meta, "截止 " + dateLabel(item.due), this.isOverdue(item) ? "danger" : "");
+    else if (item.date) this.chip(meta, "计划 " + dateLabel(item.date));
+    if (item.priorityRank <= 1) {
+      this.chip(meta, item.priority, item.priorityRank === 0 ? "danger" : "warning");
+    }
     this.chip(meta, item.file.basename);
 
     const open = row.createEl("button", {
@@ -673,6 +701,11 @@ class DailyWorkPlanView extends ItemView {
   chip(parent, text, tone = "") {
     const chip = parent.createSpan({ cls: `dwp-chip ${tone}`.trim(), text });
     return chip;
+  }
+
+  priorityChip(parent, priority, rank) {
+    const tone = rank === 0 ? "danger" : rank === 1 ? "warning" : rank === 2 ? "success" : "";
+    return this.chip(parent, priority || "未设", tone);
   }
 
   getVisibleItems() {
