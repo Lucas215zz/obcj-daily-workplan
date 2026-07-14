@@ -610,12 +610,19 @@ class DailyWorkPlanView extends ItemView {
   }
 
   renderProject(parent, project) {
-    const card = parent.createDiv({ cls: "dwp-project" });
-    card.toggleClass("is-overdue", project.overdue > 0);
-    card.toggleClass("is-today", project.today > 0 && project.overdue === 0);
-    card.toggleClass("is-complete", project.open === 0);
+    const projectEl = parent.createDiv({ cls: "dwp-project" });
+    projectEl.toggleClass("is-overdue", project.overdue > 0);
+    projectEl.toggleClass("is-today", project.today > 0 && project.overdue === 0);
+    projectEl.toggleClass("is-complete", project.open === 0);
 
-    const header = card.createDiv({ cls: "dwp-project-header" });
+    const isExpanded = this.expandedProjects.has(project.key);
+    const header = projectEl.createDiv({ cls: "dwp-project-header" });
+    const marker = header.createDiv({
+      cls: "dwp-project-marker",
+      attr: { title: project.open === 0 ? "项目已完成" : `${project.open} 个未完成任务` },
+    });
+    setIcon(marker, project.open === 0 ? "check" : "list-todo");
+
     const main = header.createDiv({ cls: "dwp-project-main" });
     const titleRow = main.createDiv({ cls: "dwp-project-title-row" });
     titleRow.createEl("h3", { text: project.name });
@@ -637,27 +644,26 @@ class DailyWorkPlanView extends ItemView {
 
     const actions = header.createDiv({ cls: "dwp-project-actions" });
     this.iconButton(actions, "plus", "新增支线任务", () => this.plugin.openNewTaskModal({ project: project.name }));
+    if (project.items.length > this.previewTaskLimit) {
+      this.iconButton(
+        actions,
+        isExpanded ? "chevron-up" : "chevron-down",
+        isExpanded ? "收起任务" : `展开全部 ${project.items.length} 个任务`,
+        () => {
+          if (isExpanded) this.expandedProjects.delete(project.key);
+          else this.expandedProjects.add(project.key);
+          this.renderTaskList();
+        }
+      );
+    }
 
-    const progress = card.createDiv({ cls: "dwp-progress", attr: { "aria-label": `项目完成度 ${project.progress}%` } });
+    const progress = projectEl.createDiv({ cls: "dwp-progress", attr: { "aria-label": `项目完成度 ${project.progress}%` } });
     progress.createDiv({ cls: "dwp-progress-bar", attr: { style: `width: ${project.progress}%` } });
 
-    const tasks = card.createDiv({ cls: "dwp-project-tasks" });
-    const isExpanded = this.expandedProjects.has(project.key);
+    const tasks = projectEl.createDiv({ cls: "dwp-project-tasks" });
     const visibleItems = isExpanded ? project.items : project.items.slice(0, this.previewTaskLimit);
     for (const item of visibleItems) {
       this.renderItem(tasks, item);
-    }
-
-    if (project.items.length > this.previewTaskLimit) {
-      const expand = card.createEl("button", {
-        cls: "dwp-project-expand",
-        text: isExpanded ? "收起任务" : `展开全部 ${project.items.length} 个任务`,
-      });
-      expand.addEventListener("click", () => {
-        if (isExpanded) this.expandedProjects.delete(project.key);
-        else this.expandedProjects.add(project.key);
-        this.renderTaskList();
-      });
     }
   }
 

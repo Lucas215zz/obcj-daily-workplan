@@ -103,30 +103,38 @@
 
 .dwp-list {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 
 .dwp-project-list {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  align-items: start;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 .dwp-project {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--dwp-card-radius);
-  background: var(--background-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: transparent;
   overflow: hidden;
 }
 
 .dwp-project-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: start;
-  padding: 10px 10px 8px;
-  background: var(--background-secondary);
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 2px 9px;
+  background: transparent;
+}
+
+.dwp-project-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  color: var(--text-muted);
 }
 
 .dwp-project-main {
@@ -134,35 +142,35 @@
 }
 
 .dwp-project-title-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
 }
 
 .dwp-project-title-row h3 {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  flex: 0 1 auto;
   margin: 0;
-  min-height: 2.7em;
   overflow: hidden;
   color: var(--text-normal);
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dwp-project-badges {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex: 1 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .dwp-project-summary {
-  margin-top: 5px;
+  margin-top: 3px;
   color: var(--text-muted);
   font-size: 0.78rem;
   overflow: hidden;
@@ -174,17 +182,19 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 7px;
+  margin-top: 6px;
 }
 
 .dwp-project-actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
+  align-items: center;
 }
 
 .dwp-progress {
-  height: 4px;
-  background: var(--background-modifier-border);
+  height: 2px;
+  margin-left: 38px;
+  background: transparent;
 }
 
 .dwp-progress-bar {
@@ -195,8 +205,9 @@
 .dwp-project-tasks {
   display: grid;
   gap: 0;
-  min-height: 168px;
-  padding: 6px 10px 4px;
+  margin-left: 38px;
+  border-left: 1px solid var(--background-modifier-border);
+  padding: 1px 0 7px 12px;
 }
 
 .dwp-row {
@@ -205,10 +216,10 @@
   align-items: start;
   gap: 7px;
   border: 0;
-  border-bottom: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
   border-radius: 0;
-  background: var(--background-primary);
-  padding: 7px 0;
+  background: transparent;
+  padding: 7px 0 7px 8px;
 }
 
 .dwp-project-tasks .dwp-row:last-child {
@@ -300,33 +311,43 @@
   color: #d64541;
 }
 
-.dwp-project-expand {
-  width: calc(100% - 20px);
-  margin: 0 10px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  padding: 7px 8px;
-  cursor: pointer;
-}
-
-.dwp-project-expand:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
-
 .dwp-project.is-overdue {
-  border-color: rgba(214, 69, 65, 0.42);
+  border-left: 3px solid rgba(214, 69, 65, 0.62);
 }
 
 .dwp-project.is-today {
-  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+  border-left: 3px solid color-mix(in srgb, var(--interactive-accent) 62%, var(--background-modifier-border));
 }
 
 .dwp-project.is-complete .dwp-progress-bar {
   background: #218c53;
+}
+
+.dwp-project.is-complete .dwp-project-marker {
+  border-color: rgba(39, 174, 96, 0.42);
+  color: #218c53;
+}
+
+@media (max-width: 520px) {
+  .dwp-project-header {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .dwp-project-actions {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 6px;
+  }
+
+  .dwp-project-badges,
+  .dwp-project-metrics {
+    flex-wrap: wrap;
+  }
+
+  .dwp-project-tasks,
+  .dwp-progress {
+    margin-left: 34px;
+  }
 }
 
 .dwp-empty {
