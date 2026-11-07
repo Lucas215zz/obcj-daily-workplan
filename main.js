@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS = {
 
 const PROJECT_FIELDS = ["项目", "project", "所属项目", "项目名称", "父项目"];
 
+const ASSIGNEE_FIELDS = ["负责人", "assignee", "owner", "经办人", "负责人名称"];
+
 const DATE_FORMATS = [
   "YYYY-MM-DD",
   "YYYY-M-D",
@@ -47,6 +49,37 @@ function firstTextValue(value) {
   if (Array.isArray(value)) return textValue(value[0]);
   if (Array.isArray(value?.values)) return textValue(value.values[0]);
   return textValue(value);
+}
+
+function listValues(value) {
+  if (value === null || value === undefined) return [];
+  const values = [];
+  const collect = input => {
+    if (input === null || input === undefined) return;
+    if (Array.isArray(input)) {
+      input.forEach(collect);
+      return;
+    }
+    if (Array.isArray(input?.values)) {
+      input.values.forEach(collect);
+      return;
+    }
+    String(input)
+      .split(/[,，、;；/|]/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .forEach(part => values.push(part));
+  };
+  collect(value);
+  return values;
+}
+
+function assigneesOf(frontmatter) {
+  for (const field of ASSIGNEE_FIELDS) {
+    const assignees = listValues(frontmatter?.[field]);
+    if (assignees.length) return assignees;
+  }
+  return [];
 }
 
 function parseDate(value) {
@@ -236,6 +269,7 @@ class DailyWorkPlanPlugin extends Plugin {
       const rank = priorityRank(frontmatter["优先级"]);
       const project = projectText(frontmatter, file.basename);
       const projectKey = slugText(project) || file.path;
+      const assignees = assigneesOf(frontmatter);
 
       if (taskMatches.length) {
         for (const task of taskMatches) {
@@ -253,6 +287,7 @@ class DailyWorkPlanPlugin extends Plugin {
             status,
             project,
             projectKey,
+            assignees,
             mtime: file.stat.mtime,
           });
         }
@@ -277,11 +312,25 @@ class DailyWorkPlanPlugin extends Plugin {
         status,
         project,
         projectKey,
+        assignees,
         mtime: file.stat.mtime,
       });
     }
 
     return items;
+  }
+
+  async loadAssigneeOptions() {
+    const files = this.app.vault.getMarkdownFiles().filter(file => this.isSourceFile(file));
+    const map = new Map();
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      for (const name of assigneesOf(cache?.frontmatter || {})) {
+        const key = slugText(name);
+        if (key && !map.has(key)) map.set(key, name);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "zh-CN"));
   }
 
   parseTasks(content) {
@@ -323,7 +372,7 @@ class DailyWorkPlanPlugin extends Plugin {
   }
 
   async updateNoteStatus(file, completed) {
-    const status = completed ? "完成" : "未完成";
+    const status = Boolean(completed);
     if (this.app.fileManager?.processFrontMatter) {
       try {
         await this.app.fileManager.processFrontMatter(file, frontmatter => {
@@ -341,9 +390,10 @@ class DailyWorkPlanPlugin extends Plugin {
   replaceFrontmatterStatus(content, status) {
     const lines = content.split(/\r?\n/);
     const eol = content.includes("\r\n") ? "\r\n" : "\n";
+    const value = status ? "true" : "false";
 
     if (lines[0] !== "---") {
-      return `---${eol}待办状态: ${status}${eol}---${eol}${content}`;
+      return `---${eol}待办状态: ${value}${eol}---${eol}${content}`;
     }
 
     const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
@@ -351,12 +401,12 @@ class DailyWorkPlanPlugin extends Plugin {
 
     for (let index = 1; index < end; index += 1) {
       if (/^待办状态\s*:/.test(lines[index])) {
-        lines[index] = `待办状态: ${status}`;
+        lines[index] = `待办状态: ${value}`;
         return lines.join(eol);
       }
     }
 
-    lines.splice(1, 0, `待办状态: ${status}`);
+    lines.splice(1, 0, `待办状态: ${value}`);
     return lines.join(eol);
   }
 
@@ -386,7 +436,10 @@ class DailyWorkPlanPlugin extends Plugin {
     const tasks = (Array.isArray(input.tasks) ? input.tasks : [input.title])
       .map(cleanTaskText)
       .filter(Boolean);
+    const title = cleanTaskText(input.title);
     const project = cleanTaskText(input.project || this.settings.defaultProject);
+    const assignees = listValues(input.assignees);
+    if (!title) throw new Error("请填写任务标题");
     if (!tasks.length) throw new Error("请至少填写一个待办事项");
 
     const baseName = `${date} ${project ? safeFileName(project) : "每日事项"}`;
@@ -402,7 +455,7 @@ class DailyWorkPlanPlugin extends Plugin {
     const content = [
       "---",
       `date: ${date}`,
-      "待办状态: 未完成",
+      "待办状态: false",
       "类别: 每日事项",
       "tags:",
       "  - 每日计划",
@@ -410,8 +463,10 @@ class DailyWorkPlanPlugin extends Plugin {
       `结束时间: ${end}`,
       `优先级: ${input.priority || this.settings.defaultPriority}`,
       `项目: ${project}`,
+      ...(assignees.length ? ["负责人:", ...assignees.map(name => `  - ${name}`)] : []),
       "备注:",
       "---",
+      `## ${title}`,
       ...tasks.map(task => `- [ ] ${task}`),
       "",
     ].join("\n");
@@ -691,6 +746,9 @@ class DailyWorkPlanView extends ItemView {
     if (item.priorityRank <= 1) {
       this.chip(meta, item.priority, item.priorityRank === 0 ? "danger" : "warning");
     }
+    for (const assignee of item.assignees) {
+      this.chip(meta, assignee, "assignee");
+    }
     this.chip(meta, item.file.basename);
 
     const open = row.createEl("button", {
@@ -720,7 +778,7 @@ class DailyWorkPlanView extends ItemView {
       .filter(item => this.matchesFilter(item))
       .filter(item => {
         if (!query) return true;
-        return `${item.text} ${item.project} ${item.file.basename} ${item.priority} ${item.status}`.toLowerCase().includes(query);
+        return `${item.text} ${item.project} ${item.file.basename} ${item.priority} ${item.status} ${item.assignees.join(" ")}`.toLowerCase().includes(query);
       })
       .sort((a, b) => this.sortItems(a, b));
   }
@@ -780,6 +838,75 @@ class NewDailyTaskModal extends Modal {
 
     const form = this.contentEl.createEl("form", { cls: "dwp-form" });
     const project = this.field(form, "所属项目", "text", "例如：视频号运营");
+    const title = this.field(form, "任务标题", "text", "例如：完成本周内容规划");
+    const assigneeWrap = form.createDiv({ cls: "dwp-field" });
+    assigneeWrap.createEl("label", { text: "负责人" });
+    const assigneeChips = assigneeWrap.createDiv({ cls: "dwp-assignee-picker" });
+    const assigneeInput = assigneeWrap.createEl("input", {
+      type: "text",
+      placeholder: "输入姓名添加新负责人，或点选下方已有负责人",
+      cls: "dwp-assignee-input",
+    });
+    const selected = new Set();
+    const selectedWrap = assigneeWrap.createDiv({ cls: "dwp-assignee-selected" });
+    const optionsWrap = assigneeWrap.createDiv({ cls: "dwp-assignee-options" });
+
+    const renderSelected = () => {
+      selectedWrap.empty();
+      if (!selected.size) {
+        selectedWrap.createSpan({ text: "未选择", cls: "dwp-assignee-hint" });
+        return;
+      }
+      for (const name of selected) {
+        const chip = selectedWrap.createSpan({ cls: "dwp-assignee-chip is-selected", text: name });
+        const remove = chip.createEl("span", { cls: "dwp-assignee-remove", text: "×" });
+        remove.addEventListener("click", () => {
+          selected.delete(name);
+          renderSelected();
+          renderOptions();
+        });
+      }
+    };
+
+    const renderOptions = async () => {
+      optionsWrap.empty();
+      const options = await this.plugin.loadAssigneeOptions();
+      const available = options.filter(name => !selected.has(name));
+      if (!available.length) {
+        optionsWrap.createSpan({ text: "暂无已登记的负责人，可在上方输入新名字", cls: "dwp-assignee-hint" });
+        return;
+      }
+      for (const name of available) {
+        const chip = optionsWrap.createEl("button", {
+          type: "button",
+          cls: "dwp-assignee-chip",
+          text: name,
+        });
+        chip.addEventListener("click", () => {
+          selected.add(name);
+          renderSelected();
+          renderOptions();
+        });
+      }
+    };
+
+    assigneeInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const name = cleanTaskText(assigneeInput.value);
+        if (name) {
+          selected.add(name);
+          assigneeInput.value = "";
+          renderSelected();
+          renderOptions();
+        }
+      }
+    });
+
+    assigneeChips.append(selectedWrap, assigneeInput, optionsWrap);
+    renderSelected();
+    renderOptions();
+
     const taskInputs = [];
     const taskGroup = form.createDiv({ cls: "dwp-task-group" });
     taskGroup.createEl("label", { text: "任务内容" });
@@ -808,6 +935,7 @@ class NewDailyTaskModal extends Modal {
     const endTime = this.field(form, "结束时间", "time");
 
     project.value = this.defaults.project || this.plugin.settings.defaultProject || "";
+    title.value = this.defaults.title || "";
     date.value = m()().format("YYYY-MM-DD");
     startTime.value = this.plugin.settings.defaultStartTime;
     endTime.value = this.plugin.settings.defaultEndTime;
@@ -831,6 +959,8 @@ class NewDailyTaskModal extends Modal {
       try {
         const file = await this.plugin.createTask({
           project: project.value,
+          title: title.value,
+          assignees: Array.from(selected),
           tasks: taskInputs.map(input => input.value),
           date: date.value,
           startTime: startTime.value,
